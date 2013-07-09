@@ -46,9 +46,16 @@ stop on shutdown
 respawn
 respawn limit 99 5
 
+instance $PORT
+
 script
-    cd #{current_path} && exec sudo -u #{node_user} NODE_ENV=#{node_env} #{app_environment} #{node_binary} #{current_path}/#{app_command} 2>> #{shared_path}/#{node_env}.err.log 1>> #{shared_path}/#{node_env}.out.log
+    cd #{current_path} && exec start-stop-daemon --start --make-pidfile --pidfile #{shared_path}/pids/#{upstart_job_name}-${PORT}.pid --chuid #{node_user} --exec /usr/bin/env PORT=${PORT} NODE_ENV=#{node_env} #{app_environment} #{node_binary} #{current_path}/#{app_command} 2>> #{shared_path}/#{node_env}.err.log 1>> #{shared_path}/#{node_env}.out.log
 end script
+
+post-stop script
+    rm -f #{shared_path}/pids/#{upstart_job_name}.pid
+end script
+
 EOD
   }
 
