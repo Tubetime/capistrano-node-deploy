@@ -32,6 +32,8 @@ Capistrano::Configuration.instance(:must_exist).load do |configuration|
   set :node_env, "production" unless defined? node_env
   set :node_user, "deploy" unless defined? node_user
 
+  set :server_port, defined?(server_port) ? server_port.kind_of?(Array) ? server_port : [server_port] : [8123]
+
   set :upstart_job_name, lambda { "#{application}-#{node_env}" } unless defined? upstart_job_name
   set :upstart_file_path, lambda { "/etc/init/#{upstart_job_name}.conf" } unless defined? upstart_file_path
   _cset(:upstart_file_contents) {
@@ -49,7 +51,7 @@ respawn limit 99 5
 instance $PORT
 
 script
-    cd #{current_path} && exec start-stop-daemon --start --make-pidfile --pidfile #{shared_path}/pids/#{upstart_job_name}-${PORT}.pid --chuid #{node_user} --exec /usr/bin/env PORT=${PORT} NODE_ENV=#{node_env} #{app_environment} #{node_binary} #{current_path}/#{app_command} 2>> #{shared_path}/#{node_env}.err.log 1>> #{shared_path}/#{node_env}.out.log
+    cd #{current_path} && exec start-stop-daemon --start --make-pidfile --pidfile #{shared_path}/pids/#{upstart_job_name}-${PORT}.pid --chuid #{node_user} --exec /usr/bin/env PORT=${PORT} NODE_ENV=#{node_env} #{app_environment} #{node_binary} #{current_path}/#{app_command} 2>> #{shared_path}/log/#{node_env}.err.log 1>> #{shared_path}/log/#{node_env}.out.log
 end script
 
 post-stop script
@@ -64,6 +66,7 @@ EOD
     desc "Check required packages and install if packages are not installed"
     task :install_packages do
       run "mkdir -p #{shared_path}/node_modules"
+      run "mkdir -p #{shared_path}/log"
       run "cp #{release_path}/package.json #{shared_path}"
       run "cp #{release_path}/npm-shrinkwrap.json #{shared_path}"
       run "cd #{shared_path} && npm install #{(node_env != 'production') ? '--dev' : ''} --loglevel warn"
@@ -87,18 +90,20 @@ EOD
 
     desc "Start the node application"
     task :start do
-      sudo "start #{upstart_job_name}"
+      server_port.each {|sp| sudo "start #{upstart_job_name} PORT=#{sp}"}
     end
 
     desc "Stop the node application"
     task :stop do
-      sudo "stop #{upstart_job_name}"
+      server_port.each {|sp| sudo "stop #{upstart_job_name} PORT=#{sp}"}
     end
 
     desc "Restart the node application"
     task :restart do
-      sudo "stop #{upstart_job_name}; true"
-      sudo "start #{upstart_job_name}"
+      server_port.each do |sp|
+        sudo "stop #{upstart_job_name} PORT=#{sp}; true"
+        sudo "start #{upstart_job_name} PORT=#{sp}"
+      end
     end
   end
 
@@ -108,5 +113,13 @@ EOD
       mkdir_commands = ["log", "pids"].map {|dir| "mkdir -p #{shared_path}/#{dir}"}
       run mkdir_commands.unshift(mkdir_releases).join(" && ")
     end
+
+    [:start, :stop, :restart].each do |action|
+      desc "#{action} the app"
+      task action, :roles => :app do
+        node.send(action)
+      end
+    end
+
   end
 end
